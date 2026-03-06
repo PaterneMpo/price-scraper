@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "price-scraper"
+version = "1.0.0"
+description = "Production-grade price scraper with dashboard, Slack alerts & Google Sheets"
+authors = ["M'PO Paterne <moktmunk@gmail.com>"]
+readme = "README.md"
+packages = [{include = "price_scraper"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+scrapy = "^2.11"
+flask = "^3.0"
+apscheduler = "^3.10"
+gspread = "^6.0"
+oauth2client = "^4.1"
+requests = "^2.31"
+python-dotenv = "^1.0"
+gunicorn = "^22.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+black = "^24.0"
+ruff = "^0.4"
+
+[tool.poetry.scripts]
+start = "price_scraper.app:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

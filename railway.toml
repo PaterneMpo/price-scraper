@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "poetry run gunicorn 'price_scraper.app:create_app()' --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5

@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Price Scraper — Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a5f' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .price-up   { color: #ef4444; }
+    .price-down { color: #22c55e; }
+    .price-flat { color: #94a3b8; }
+    .fade-in { animation: fadeIn .4s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+    .pulse-dot { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+    .glass { background: rgba(30,41,59,.8); backdrop-filter: blur(12px); }
+    .chart-container { position:relative; height:220px; }
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50; display:flex; align-items:center; justify-content:center; }
+    .modal { background:#1e293b; border:1px solid #334155; border-radius:16px; padding:24px; width:min(700px, 95vw); max-height:90vh; overflow-y:auto; }
+    .scrape-btn { transition: all .2s; }
+    .scrape-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(59,130,246,.4); }
+    .stat-card { transition: all .2s; }
+    .stat-card:hover { transform: translateY(-2px); }
+    tr.product-row { cursor: pointer; transition: background .15s; }
+    tr.product-row:hover td { background: #1e293b !important; }
+    .badge { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:999px; font-size:.75rem; font-weight:600; }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+<!-- ── TOP NAV ──────────────────────────────────────────────────────── -->
+<nav class="border-b border-slate-800 glass sticky top-0 z-40">
+  <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🕷</span>
+      <div>
+        <h1 class="text-lg font-bold text-white leading-tight">Price Scraper</h1>
+        <p class="text-xs text-slate-400 leading-tight">Surveillance des prix en temps réel</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <!-- Status badge -->
+      <div id="status-badge" class="badge">
+        {% if scrape_state.status == 'running' %}
+          <span class="pulse-dot w-2 h-2 rounded-full bg-yellow-400 inline-block"></span>
+          <span class="text-yellow-300">En cours...</span>
+        {% elif scrape_state.status == 'success' %}
+          <span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+          <span class="text-green-300">Succès</span>
+        {% elif scrape_state.status == 'error' %}
+          <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+          <span class="text-red-300">Erreur</span>
+        {% else %}
+          <span class="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
+          <span class="text-slate-300">En attente</span>
+        {% endif %}
+      </div>
+
+      <!-- Trigger button -->
+      <button onclick="triggerScrape()"
+        class="scrape-btn bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.131a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Lancer le scraper
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ── MAIN ──────────────────────────────────────────────────────────── -->
+<main class="max-w-7xl mx-auto px-4 py-8 space-y-8 fade-in">
+
+  <!-- ── STAT CARDS ─────────────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+    <div class="stat-card glass rounded-2xl p-5 border border-slate-800">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Produits suivis</p>
+      <p class="text-4xl font-bold text-white">{{ stats.total_products }}</p>
+      <p class="text-xs text-slate-500 mt-1">URLs enregistrées</p>
+    </div>
+
+    <div class="stat-card glass rounded-2xl p-5 border border-slate-800">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Scrapés aujourd'hui</p>
+      <p class="text-4xl font-bold text-brand-500">{{ stats.scraped_today }}</p>
+      <p class="text-xs text-slate-500 mt-1">Sur {{ stats.total_products }} produits</p>
+    </div>
+
+    <div class="stat-card glass rounded-2xl p-5 border border-emerald-900/50">
+      <p class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">Baisses de prix</p>
+      <p class="text-4xl font-bold text-emerald-400">{{ stats.price_drops }}</p>
+      <p class="text-xs text-slate-500 mt-1">Opportunités détectées</p>
+    </div>
+
+    <div class="stat-card glass rounded-2xl p-5 border border-red-900/50">
+      <p class="text-xs font-semibold text-red-400 uppercase tracking-wider mb-1">Hausses de prix</p>
+      <p class="text-4xl font-bold text-red-400">{{ stats.price_rises }}</p>
+      <p class="text-xs text-slate-500 mt-1">Augmentations récentes</p>
+    </div>
+
+  </div>
+
+  <!-- ── LAST SCRAPE INFO ───────────────────────────────────────────── -->
+  {% if last_log %}
+  <div class="glass rounded-2xl p-4 border border-slate-800 flex flex-wrap items-center gap-6 text-sm">
+    <div>
+      <span class="text-slate-400">Dernier scraping :</span>
+      <span class="text-white font-medium ml-2">{{ last_log.started_at[:16].replace('T', ' ') }} UTC</span>
+    </div>
+    <div>
+      <span class="text-slate-400">Durée :</span>
+      <span class="text-white font-medium ml-2">
+        {% if last_log.finished_at %}
+          {% set start = last_log.started_at %}
+          quelques secondes
+        {% else %}—{% endif %}
+      </span>
+    </div>
+    <div>
+      <span class="text-slate-400">Produits mis à jour :</span>
+      <span class="text-white font-medium ml-2">{{ last_log.products_updated }}</span>
+    </div>
+    <div>
+      <span class="text-slate-400">Statut :</span>
+      {% if last_log.status == 'success' %}
+        <span class="badge bg-emerald-950 text-emerald-300 ml-2">✅ Succès</span>
+      {% elif last_log.status == 'error' %}
+        <span class="badge bg-red-950 text-red-300 ml-2">❌ Erreur</span>
+      {% else %}
+        <span class="badge bg-slate-800 text-slate-300 ml-2">⏳ {{ last_log.status }}</span>
+      {% endif %}
+    </div>
+    <div class="ml-auto text-slate-500 text-xs">Prochain : {{ scrape_hour }}h00 UTC</div>
+  </div>
+  {% endif %}
+
+  <!-- ── PRODUCTS TABLE ─────────────────────────────────────────────── -->
+  <div class="glass rounded-2xl border border-slate-800 overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+      <h2 class="font-bold text-white text-lg">Produits surveillés</h2>
+      <span class="text-slate-400 text-sm">Cliquer sur un produit pour voir l'historique</span>
+    </div>
+
+    {% if products %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-800">
+            <th class="px-6 py-3 text-left text-xs font-semibold text-slate-400 uppercase">Produit</th>
+            <th class="px-6 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Prix actuel</th>
+            <th class="px-6 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Variation</th>
+            <th class="px-6 py-3 text-right text-xs font-semibold text-slate-400 uppercase">Dernière MàJ</th>
+            <th class="px-6 py-3 text-center text-xs font-semibold text-slate-400 uppercase">Lien</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in products %}
+          {% set change = (p.current_price - p.previous_price) if p.previous_price else 0 %}
+          {% set pct = (change / p.previous_price * 100) if p.previous_price else 0 %}
+          <tr class="product-row border-b border-slate-800/50"
+              onclick="openChart({{ p.id }}, '{{ p.name | replace("'", "\\'") }}')">
+            <td class="px-6 py-4">
+              <div class="font-medium text-white">{{ p.name or 'Produit #' + p.id|string }}</div>
+              <div class="text-xs text-slate-500 truncate max-w-xs">{{ p.url }}</div>
+            </td>
+            <td class="px-6 py-4 text-right font-bold text-white tabular-nums">
+              {% if p.current_price %}
+                {{ "%.2f"|format(p.current_price) }} {{ p.currency or '€' }}
+              {% else %}
+                <span class="text-slate-500">—</span>
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 text-right tabular-nums">
+              {% if p.previous_price and p.current_price %}
+                {% if change < 0 %}
+                  <span class="price-down font-semibold">▼ {{ "%.2f"|format(change|abs) }} ({{ "%.1f"|format(pct|abs) }}%)</span>
+                {% elif change > 0 %}
+                  <span class="price-up font-semibold">▲ {{ "%.2f"|format(change) }} (+{{ "%.1f"|format(pct) }}%)</span>
+                {% else %}
+                  <span class="price-flat">= stable</span>
+                {% endif %}
+              {% else %}
+                <span class="text-slate-500 text-xs">Première entrée</span>
+              {% endif %}
+            </td>
+            <td class="px-6 py-4 text-right text-slate-400 text-xs">
+              {{ p.last_scraped[:16].replace('T', ' ') if p.last_scraped else '—' }}
+            </td>
+            <td class="px-6 py-4 text-center">
+              <a href="{{ p.url }}" target="_blank" onclick="event.stopPropagation()"
+                class="text-brand-500 hover:text-brand-400 inline-flex items-center gap-1 text-xs">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                </svg>
+                Voir
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-6 py-16 text-center">
+      <p class="text-4xl mb-3">🔍</p>
+      <p class="text-slate-400">Aucun produit encore — lance un premier scraping !</p>
+      <p class="text-slate-500 text-sm mt-2">Configure <code class="bg-slate-800 px-1 rounded">URLS_TO_SCRAPE</code> dans tes variables d'environnement</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── INTEGRATIONS ROW ───────────────────────────────────────────── -->
+  <div class="grid md:grid-cols-2 gap-6">
+
+    <!-- Google Sheets -->
+    <div class="glass rounded-2xl border border-slate-800 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-800 flex items-center gap-3">
+        <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+          <polyline points="14 2 14 8 20 8" stroke="white" stroke-width="1.5" fill="none"/>
+        </svg>
+        <h2 class="font-bold text-white">Google Sheets</h2>
+        {% if sheet_url %}
+          <span class="badge bg-emerald-950 text-emerald-300 ml-auto">✓ Configuré</span>
+        {% else %}
+          <span class="badge bg-slate-800 text-slate-400 ml-auto">Non configuré</span>
+        {% endif %}
+      </div>
+      {% if sheet_url %}
+      <div class="p-6">
+        <p class="text-slate-400 text-sm mb-4">Les données de prix sont synchronisées en temps réel dans ce Google Sheet public.</p>
+        <a href="{{ sheet_url }}" target="_blank"
+          class="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-3 rounded-xl transition-all w-full text-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+          Ouvrir le Google Sheet
+        </a>
+        <p class="text-xs text-slate-600 text-center mt-3">Accès public en lecture seule</p>
+      </div>
+      <!-- Aperçu embarqué -->
+      <div class="border-t border-slate-800">
+        <iframe src="{{ sheet_url | replace('/edit', '/preview') | replace('?usp=sharing', '') }}"
+          class="w-full h-64 bg-white" frameborder="0" title="Google Sheet"></iframe>
+      </div>
+      {% else %}
+      <div class="p-6 text-center">
+        <p class="text-slate-400 text-sm">Configure <code class="bg-slate-800 px-1 rounded text-xs">GOOGLE_SHEET_PUBLIC_URL</code> pour voir le Sheet ici.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Slack -->
+    <div class="glass rounded-2xl border border-slate-800 overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-800 flex items-center gap-3">
+        <svg class="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.687 8.834a2.528 2.528 0 0 1-2.521 2.521 2.527 2.527 0 0 1-2.521-2.521V2.522A2.527 2.527 0 0 1 15.166 0a2.528 2.528 0 0 1 2.521 2.522v6.312zM15.166 18.956a2.528 2.528 0 0 1 2.521 2.522A2.528 2.528 0 0 1 15.166 24a2.527 2.527 0 0 1-2.521-2.522v-2.522h2.521zM15.166 17.687a2.527 2.527 0 0 1-2.521-2.521 2.526 2.526 0 0 1 2.521-2.521h6.312A2.527 2.527 0 0 1 24 15.166a2.528 2.528 0 0 1-2.522 2.521h-6.312z"/>
+        </svg>
+        <h2 class="font-bold text-white">Slack Alerts</h2>
+        {% if slack_configured %}
+          <span class="badge bg-purple-950 text-purple-300 ml-auto">✓ Connecté</span>
+        {% else %}
+          <span class="badge bg-slate-800 text-slate-400 ml-auto">Non configuré</span>
+        {% endif %}
+      </div>
+      <div class="p-6 space-y-4">
+        {% if slack_configured %}
+
+        {% if recent_alerts %}
+          <!-- Vraies alertes depuis la DB -->
+          {% for alert in recent_alerts %}
+          {% set is_drop = alert.pct_change < 0 %}
+          <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded bg-purple-600 flex items-center justify-center text-white font-bold text-sm shrink-0">🕷</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline gap-2">
+                  <span class="font-semibold text-white text-sm">Price Scraper Bot</span>
+                  <span class="text-slate-500 text-xs">{{ alert.scraped_at[:16].replace('T', ' ') }}</span>
+                </div>
+                <div class="mt-2 bg-slate-800 border-l-4 {{ 'border-emerald-500' if is_drop else 'border-red-500' }} rounded-r-lg p-3 text-sm">
+                  <p class="font-semibold {{ 'text-emerald-400' if is_drop else 'text-red-400' }}">
+                    {{ '📉' if is_drop else '📈' }} Changement de prix détecté
+                  </p>
+                  <div class="grid grid-cols-2 gap-2 mt-2 text-xs text-slate-300">
+                    <div><span class="text-slate-500">Produit</span><br/><span>{{ alert.product_name[:40] }}</span></div>
+                    <div><span class="text-slate-500">Variation</span><br/>
+                      <span class="{{ 'text-emerald-400' if is_drop else 'text-red-400' }} font-semibold">
+                        {{ "%+.1f"|format(alert.pct_change) }}%
+                      </span>
+                    </div>
+                    <div><span class="text-slate-500">Ancien prix</span><br/><span>{{ "%.2f"|format(alert.old_price) }} {{ alert.currency }}</span></div>
+                    <div><span class="text-slate-500">Nouveau prix</span><br/><span class="font-bold text-white">{{ "%.2f"|format(alert.new_price) }} {{ alert.currency }}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+
+        {% else %}
+          <!-- Aucune alerte encore — message informatif -->
+          <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 text-center">
+            <p class="text-slate-500 text-sm">Aucun changement de prix détecté pour l'instant.</p>
+            <p class="text-slate-600 text-xs mt-1">Les alertes apparaîtront ici dès qu'une variation ≥ {{ alert_threshold }}% sera détectée.</p>
+          </div>
+        {% endif %}
+
+        <p class="text-slate-400 text-sm">
+          Les alertes sont envoyées dans <code class="bg-slate-800 px-1.5 py-0.5 rounded text-purple-300">{{ slack_channel }}</code>
+          dès qu'une variation ≥ seuil est détectée.
+        </p>
+        {% else %}
+        <div class="text-center py-4">
+          <p class="text-4xl mb-3">💬</p>
+          <p class="text-slate-400 text-sm mb-4">Configure un Webhook Slack pour recevoir des alertes instantanées.</p>
+          <a href="https://api.slack.com/apps" target="_blank"
+            class="inline-flex items-center gap-2 bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all">
+            Créer un Webhook Slack →
+          </a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div><!-- /integrations row -->
+
+</main>
+
+<!-- ── CHART MODAL ──────────────────────────────────────────────────── -->
+<div id="chart-modal" class="modal-overlay hidden" onclick="closeChart(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-6">
+      <h3 id="chart-title" class="text-xl font-bold text-white"></h3>
+      <button onclick="closeChart()" class="text-slate-400 hover:text-white transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="chart-container">
+      <canvas id="price-chart"></canvas>
+    </div>
+    <div id="chart-stats" class="grid grid-cols-3 gap-4 mt-6"></div>
+  </div>
+</div>
+
+<!-- ── SCRAPE TOKEN MODAL ────────────────────────────────────────────── -->
+<div id="token-modal" class="modal-overlay hidden" onclick="closeTokenModal(event)">
+  <div class="modal max-w-sm" onclick="event.stopPropagation()">
+    <h3 class="text-lg font-bold text-white mb-4">🔐 Authentification requise</h3>
+    <p class="text-slate-400 text-sm mb-4">Entre ton token secret pour déclencher le scraper manuellement.</p>
+    <input id="token-input" type="password" placeholder="SCRAPE_SECRET_TOKEN"
+      class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none focus:border-brand-500 mb-4"
+      onkeydown="if(event.key==='Enter') confirmScrape()"/>
+    <div class="flex gap-3">
+      <button onclick="confirmScrape()" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-all">
+        Lancer
+      </button>
+      <button onclick="closeTokenModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-all">
+        Annuler
+      </button>
+    </div>
+    <div id="token-error" class="text-red-400 text-sm mt-3 hidden"></div>
+  </div>
+</div>
+
+<!-- ── SCRIPTS ──────────────────────────────────────────────────────── -->
+<script>
+let chartInstance = null;
+
+// ── Chart modal ──────────────────────────────────────────────────────
+async function openChart(productId, name) {
+  document.getElementById('chart-title').textContent = name;
+  document.getElementById('chart-modal').classList.remove('hidden');
+
+  const res = await fetch(`/api/prices/${productId}`);
+  const data = await res.json();
+
+  if (!data.length) {
+    document.getElementById('chart-stats').innerHTML = '<p class="text-slate-400 col-span-3 text-center">Pas encore d\'historique disponible.</p>';
+    return;
+  }
+
+  const labels = data.map(d => d.scraped_at.slice(0, 10));
+  const prices = data.map(d => d.price);
+  const currency = data[0]?.currency || '€';
+
+  if (chartInstance) chartInstance.destroy();
+
+  const ctx = document.getElementById('price-chart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: `Prix (${currency})`,
+        data: prices,
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59,130,246,.1)',
+        borderWidth: 2.5,
+        pointBackgroundColor: '#3b82f6',
+        pointRadius: 4,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
+        y: { ticks: { color: '#64748b', callback: v => v.toFixed(2) + ' ' + currency }, grid: { color: '#1e293b' } }
+      }
+    }
+  });
+
+  // Stats
+  const min = Math.min(...prices), max = Math.max(...prices), last = prices[prices.length - 1];
+  document.getElementById('chart-stats').innerHTML = `
+    <div class="bg-slate-900 rounded-xl p-3 text-center">
+      <p class="text-xs text-slate-400 mb-1">Prix min</p>
+      <p class="text-lg font-bold text-emerald-400">${min.toFixed(2)} ${currency}</p>
+    </div>
+    <div class="bg-slate-900 rounded-xl p-3 text-center">
+      <p class="text-xs text-slate-400 mb-1">Prix actuel</p>
+      <p class="text-lg font-bold text-white">${last.toFixed(2)} ${currency}</p>
+    </div>
+    <div class="bg-slate-900 rounded-xl p-3 text-center">
+      <p class="text-xs text-slate-400 mb-1">Prix max</p>
+      <p class="text-lg font-bold text-red-400">${max.toFixed(2)} ${currency}</p>
+    </div>
+  `;
+}
+
+function closeChart(event) {
+  if (!event || event.target === document.getElementById('chart-modal')) {
+    document.getElementById('chart-modal').classList.add('hidden');
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  }
+}
+
+// ── Scrape trigger ───────────────────────────────────────────────────
+function triggerScrape() {
+  document.getElementById('token-modal').classList.remove('hidden');
+  document.getElementById('token-input').value = '';
+  document.getElementById('token-error').classList.add('hidden');
+  setTimeout(() => document.getElementById('token-input').focus(), 50);
+}
+
+function closeTokenModal(event) {
+  if (!event || event.target === document.getElementById('token-modal'))
+    document.getElementById('token-modal').classList.add('hidden');
+}
+
+async function confirmScrape() {
+  const token = document.getElementById('token-input').value;
+  const errEl = document.getElementById('token-error');
+  errEl.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Scrape-Token': token },
+      body: JSON.stringify({ token })
+    });
+    if (res.status === 401) {
+      errEl.textContent = '❌ Token incorrect';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    document.getElementById('token-modal').classList.add('hidden');
+    updateStatusBadge('running');
+    pollStatus();
+  } catch(e) {
+    errEl.textContent = '❌ Erreur réseau';
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ── Status polling ───────────────────────────────────────────────────
+function updateStatusBadge(status) {
+  const el = document.getElementById('status-badge');
+  const configs = {
+    running: { dot: 'bg-yellow-400 pulse-dot', text: 'text-yellow-300', label: 'En cours...' },
+    success: { dot: 'bg-green-400', text: 'text-green-300', label: 'Succès' },
+    error:   { dot: 'bg-red-400', text: 'text-red-300', label: 'Erreur' },
+    idle:    { dot: 'bg-slate-400', text: 'text-slate-300', label: 'En attente' },
+  };
+  const c = configs[status] || configs.idle;
+  el.innerHTML = `<span class="w-2 h-2 rounded-full inline-block ${c.dot}"></span><span class="${c.text}">${c.label}</span>`;
+}
+
+function pollStatus() {
+  const interval = setInterval(async () => {
+    const res = await fetch('/api/scrape/status');
+    const data = await res.json();
+    updateStatusBadge(data.status);
+    if (data.status !== 'running') {
+      clearInterval(interval);
+      if (data.status === 'success') {
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    }
+  }, 2000);
+}
+
+// Auto-refresh des stats toutes les 60s
+setInterval(async () => {
+  const res = await fetch('/api/scrape/status');
+  const data = await res.json();
+  updateStatusBadge(data.status);
+}, 60000);
+</script>
+</body>
+</html>
