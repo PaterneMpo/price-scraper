@@ -11,7 +11,7 @@
 
 **Scraper de surveillance des prix avec dashboard temps réel, alertes Slack et export Google Sheets.**
 
-[🌐 Demo Live](https://your-project.up.railway.app) · [📊 Google Sheet public](https://docs.google.com/spreadsheets/d/163pjxy9hgN6XfLON-ajkG5s7Qz7iISwW36B9ORl4Blo/edit?usp=sharing)
+[🌐 Demo Live](https://price-scraper-production-fc13.up.railway.app/) · [📊 Google Sheet public](https://docs.google.com/spreadsheets/d/163pjxy9hgN6XfLON-ajkG5s7Qz7iISwW36B9ORl4Blo/edit?usp=sharing)
 
 </div>
 
